@@ -14,12 +14,6 @@
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
 	  <GenerateAssemblyInfo>True</GenerateAssemblyInfo>
 	</PropertyGroup>
-  
-	
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Exec Command="copy /Y &quot;$(TargetPath)&quot; &quot;C:\Program Files (x86)\Steam\steamapps\common\Rain World\RainWorld_Data\StreamingAssets\mods\FallThroughMap\plugins&quot;" />
-  </Target>
-  
 	
   <ItemGroup>
     <Reference Include="0Harmony">
