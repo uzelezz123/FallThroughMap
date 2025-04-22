@@ -15,16 +15,16 @@ using UnityEngine;
 
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
 
-namespace FallThroughMap;
+namespace FallThroughMap;//logical pits but ehhh
 
 [BepInDependency("SBCameraScroll", BepInDependency.DependencyFlags.SoftDependency)]
 [BepInPlugin(PLUGIN_GUID, PLUGIN_NAME, PLUGIN_VERSION)]
 public partial class FallThroughMap : BaseUnityPlugin
 {
     public const string PLUGIN_GUID = "useless.fallthroughmap";
-    public const string PLUGIN_NAME = "FallThroughMap";
+    public const string PLUGIN_NAME = "Logical Pits";
     public const string PLUGIN_DESC = "";
-    public const string PLUGIN_VERSION = "0.0.8";
+    public const string PLUGIN_VERSION = "0.0.9";
     public static ManualLogSource Log;
     public static FallThroughMapOptions Options = FallThroughMapOptions.instance;
     
@@ -270,7 +270,7 @@ public partial class FallThroughMap : BaseUnityPlugin
                     }
                 }
 
-                if (cr.abstractCreature.FollowedByCamera(0) && fellRoom.game.cameras[0].loadingRoom != fellRoom && fellRoom.ReadyForPlayer && fellRoom.game.cameras[0].room != fellRoom)
+                if (cr.abstractCreature.FollowedByCamera(0) && fellRoom.ReadyForPlayer && fellRoom.game.cameras[0].room != fellRoom)
                 {
                     fellRoom.game.cameras[0].virtualMicrophone.AllQuiet();
                     var room_camera = fellRoom.game.cameras[0];
