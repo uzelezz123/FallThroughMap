@@ -125,7 +125,7 @@
 	    <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\RainWorld_Data\Managed\Rewired_Windows.dll</HintPath>
 	  </Reference>
 	  <Reference Include="SBCameraScroll">
-	    <HintPath>..\SBCameraScroll.dll</HintPath>
+	    <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\workshop\content\312520\2928752589\plugins\SBCameraScroll.dll</HintPath>
 	  </Reference>
 	  <Reference Include="SonyPS4CommonDialog">
 	    <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Rain World\RainWorld_Data\Managed\SonyPS4CommonDialog.dll</HintPath>

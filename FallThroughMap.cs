@@ -24,7 +24,7 @@ public partial class FallThroughMap : BaseUnityPlugin
     public const string PLUGIN_GUID = "useless.fallthroughmap";
     public const string PLUGIN_NAME = "Logical Pits";
     public const string PLUGIN_DESC = "";
-    public const string PLUGIN_VERSION = "0.0.9";
+    public const string PLUGIN_VERSION = "0.1.0";
     public static ManualLogSource Log;
     public static FallThroughMapOptions Options = FallThroughMapOptions.instance;
     
@@ -78,7 +78,7 @@ public partial class FallThroughMap : BaseUnityPlugin
     {
         if (camera.followAbstractCreature.realizedCreature != null && FallThroughMap.FallingEntities != null && FallThroughMap.FallingEntities.TryGetValue(camera.followAbstractCreature.realizedCreature, out var huy) && camera.room == huy.fellRoom)
         {
-            SBCameraScroll.RoomCameraMod.Attached_Fields attached_Fields = SBCameraScroll.RoomCameraMod.Get_Attached_Fields(camera);
+            SBCameraScroll.RoomCameraMod.RoomCameraFields attached_Fields = SBCameraScroll.RoomCameraMod.GetFields(camera);
             attached_Fields.last_on_screen_position = huy.fellRoomPosition;
             attached_Fields.on_screen_position = huy.fellRoomPosition;
         }
