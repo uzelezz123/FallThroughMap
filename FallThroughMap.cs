@@ -112,11 +112,13 @@ public partial class FallThroughMap : BaseUnityPlugin
             onlyPlayerFall = this.config.Bind<bool>("onlyPlayerFall", false);
             checkForConnections = this.config.Bind<bool>("checkForConnections", true);
             fallmul = this.config.Bind<int>("fallmul", 100, new ConfigAcceptableRange<int>(0, 200));
+            canGoThruSides = this.config.Bind<bool>("canGoThruSides", true);
         }
 
         public readonly Configurable<bool> fallOnOtherLayers;
         public readonly Configurable<bool> onlyPlayerFall;
         public readonly Configurable<bool> checkForConnections;
+        public readonly Configurable<bool> canGoThruSides;
         public readonly Configurable<int> fallmul;
 
         private UIelement[] UIArrPlayerOptions;
@@ -141,6 +143,8 @@ public partial class FallThroughMap : BaseUnityPlugin
                 new OpLabel(10f, 350f, "(if disabled, you will sometimes fall in inacessible rooms)"),
                 new OpLabel(10f, 320f, "Fall velocity multiplier (in percent)"),
                 new OpSlider(fallmul, new Vector2(10f, 260f), 200, false),
+                new OpLabel(10f, 220f, "Allow going through the sides of rooms"),
+                new OpCheckBox(canGoThruSides, new Vector2(10f,190f)),
             };
 
             opTab.AddItems(UIArrPlayerOptions);
@@ -654,6 +658,11 @@ public partial class FallThroughMap : BaseUnityPlugin
                     );
 
                 Log.LogDebug("FallThroughMap available room " + room.name + " Int: " + intersection + " Int2: " + intersectionOurRect);
+
+                if (!Options.canGoThruSides.Value && (intersectionOurRect == 2 || intersectionOurRect == 4))
+                {
+                    continue;
+                }
 
                 if (intersection > 0 && ((intersection == 1 && intersectionOurRect == 3) || (intersection == 2 && intersectionOurRect == 4) || (intersectionOurRect == 1 && intersection == 3) || (intersectionOurRect == 2 && intersection == 4)))
                 {
