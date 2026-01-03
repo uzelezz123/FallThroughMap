@@ -26,7 +26,7 @@ public partial class FallThroughMap : BaseUnityPlugin
     public const string PLUGIN_GUID = "useless.fallthroughmap";
     public const string PLUGIN_NAME = "Logical Pits";
     public const string PLUGIN_DESC = "";
-    public const string PLUGIN_VERSION = "0.1.0";
+    public const string PLUGIN_VERSION = "0.1.1";
     public static ManualLogSource Log;
     public static FallThroughMapOptions Options = FallThroughMapOptions.instance;
     
@@ -113,12 +113,16 @@ public partial class FallThroughMap : BaseUnityPlugin
             checkForConnections = this.config.Bind<bool>("checkForConnections", true);
             fallmul = this.config.Bind<int>("fallmul", 100, new ConfigAcceptableRange<int>(0, 200));
             canGoThruSides = this.config.Bind<bool>("canGoThruSides", true);
+            canGoUpwards = this.config.Bind<bool>("canGoUpwards", true);
+            creaturesCanGoThruSides = this.config.Bind<bool>("creaturesCanGoThruSides", false);
         }
 
         public readonly Configurable<bool> fallOnOtherLayers;
         public readonly Configurable<bool> onlyPlayerFall;
         public readonly Configurable<bool> checkForConnections;
         public readonly Configurable<bool> canGoThruSides;
+        public readonly Configurable<bool> canGoUpwards;
+        public readonly Configurable<bool> creaturesCanGoThruSides;
         public readonly Configurable<int> fallmul;
 
         private UIelement[] UIArrPlayerOptions;
@@ -145,6 +149,11 @@ public partial class FallThroughMap : BaseUnityPlugin
                 new OpSlider(fallmul, new Vector2(10f, 260f), 200, false),
                 new OpLabel(10f, 220f, "Allow going through the sides of rooms"),
                 new OpCheckBox(canGoThruSides, new Vector2(10f,190f)),
+                new OpLabel(10f, 150f, "Allow going upwards in the room"),
+                new OpCheckBox(canGoUpwards, new Vector2(10f,110f)),
+
+                new OpLabel(200f, 520f, "Allow creatures going sides of the rooms"),
+                new OpCheckBox(creaturesCanGoThruSides, new Vector2(10f,490f)),
             };
 
             opTab.AddItems(UIArrPlayerOptions);
@@ -214,8 +223,9 @@ public partial class FallThroughMap : BaseUnityPlugin
             {
                 if (bodyChunk == null) continue;
 
-                bodyChunk.vel *= 0;
-                bodyChunk.vel += new Vector2(0, cr.gravity);
+                bodyChunk.vel = vel;
+                //bodyChunk.vel *= 0;
+                //bodyChunk.vel += new Vector2(0, cr.gravity);
             }
 
             if (fellRoom != null && ((cr is Player && fellRoom.ReadyForPlayer) || (abstrcr.abstractAI != null && fellRoom.readyForAI)))
@@ -551,9 +561,7 @@ public partial class FallThroughMap : BaseUnityPlugin
         }
 
         bool fell = posit.y < -100f
-            || posit.y > cr.room.PixelHeight
-            //|| cr.bodyChunks[0].pos.x > cr.room.PixelWidth + 200f - 20f
-            //|| cr.bodyChunks[0].pos.x < -200f + 20f;
+            || posit.y > cr.room.PixelHeight + 100f
             || posit.x > cr.room.PixelWidth + 200f - 20f
             || posit.x < -200f + 20f;
 
@@ -566,211 +574,227 @@ public partial class FallThroughMap : BaseUnityPlugin
 
         //so much magic numbers, beautiful
 
-        if (fell)
+        if (!fell) { return restrictInRoomRange; }
+
+        if (FallingEntities.TryGetValue(cr, out var huy) || cr.grabbedBy.Count > 0) return -16000f;
+
+
+        var vel = new Vector2();
+        int cntr = 0;
+
+        foreach (BodyChunk bc in cr.bodyChunks)
         {
-            if (FallingEntities.TryGetValue(cr, out var huy) || cr.grabbedBy.Count > 0) return -16000f;
+            vel += bc.vel;
+            cntr++;
+        }
 
-            var vel = cr.bodyChunks[0].vel;// + new Vector2(0, -10);
-            //vel.x = 0;
+        vel /= cntr; // if you have 0 bodychunks, well....
 
-            var normvel = vel.normalized;
+        var normvel = vel.normalized;
 
-            AbstractRoom fallRoom = null;
-            Vector2 fallDir = Vector2.zero;
-            Vector2 intersectionPosition = Vector2.zero;
-            float roomDist = float.MaxValue;
+        AbstractRoom fallRoom = null;
+        Vector2 fallDir = Vector2.zero;
+        Vector2 intersectionPosition = Vector2.zero;
+        float roomDist = float.MaxValue;
 
-            Vector2 pos = cr.room.world.RoomToWorldPos(cr.bodyChunks[0].pos, cr.room.abstractRoom.index);
+        Vector2 pos = cr.room.world.RoomToWorldPos(cr.bodyChunks[0].pos, cr.room.abstractRoom.index);
 
-            /*List<World> worlds = new List<World>();
-            for (int i = 0; i < abstractRooms.Length; i++)
+        /*List<World> worlds = new List<World>();
+        for (int i = 0; i < abstractRooms.Length; i++)
+        {
+            var room = abstractRooms[i];
+            if (!room.gate) continue;
+            string[] gateName = Regex.Split(room.name, "_");
+            string otherWorldName = "ERROR!";
+            if (gateName.Length == 3)
+                for (int j = 1; j < 3; j++)
+                    if (gateName[j] != cr.room.world.name)
+                    {
+                        otherWorldName = gateName[j];
+                        break;
+                    }
+            if (otherWorldName == "ERROR!") continue;
+            try
             {
-                var room = abstractRooms[i];
-                if (!room.gate) continue;
-                string[] gateName = Regex.Split(room.name, "_");
-                string otherWorldName = "ERROR!";
-                if (gateName.Length == 3)
-                    for (int j = 1; j < 3; j++)
-                        if (gateName[j] != cr.room.world.name)
-                        {
-                            otherWorldName = gateName[j];
-                            break;
-                        }
-                if (otherWorldName == "ERROR!") continue;
-                try
-                {
-                    World oldWorld = cr.room.game.world;
-                    cr.room.game.overWorld.LoadWorld(otherWorldName, (cr as Player).slugcatStats.name, false);
-                    worlds.Add(cr.room.game.overWorld.activeWorld);
-                    cr.room.game.overWorld.activeWorld = oldWorld;
-                }
-                catch(Exception e)
-                {
-                    Log.LogDebug(e);
-                }
-            }*/
-            //later!
+                World oldWorld = cr.room.game.world;
+                cr.room.game.overWorld.LoadWorld(otherWorldName, (cr as Player).slugcatStats.name, false);
+                worlds.Add(cr.room.game.overWorld.activeWorld);
+                cr.room.game.overWorld.activeWorld = oldWorld;
+            }
+            catch(Exception e)
+            {
+                Log.LogDebug(e);
+            }
+        }*/
+        //later!
 
-            var startOurRect = GetMapPos(cr.room.abstractRoom);
-            var sizeOurRect = GetMapSize(cr.room.abstractRoom);
-            var center = startOurRect + sizeOurRect * 0.5f;
-            int intersectionOurRect = LineIntersectsRect(center, center + (pos - center) * 2f,
-                new Vector2(startOurRect.x, startOurRect.y + sizeOurRect.y), // upper left corner
-                new Vector2(startOurRect.x + sizeOurRect.x, startOurRect.y + sizeOurRect.y),
-                new Vector2(startOurRect.x + sizeOurRect.x, startOurRect.y),
-                new Vector2(startOurRect.x, startOurRect.y)
+        var startOurRect = GetMapPos(cr.room.abstractRoom);
+        var sizeOurRect = GetMapSize(cr.room.abstractRoom);
+        var center = startOurRect + sizeOurRect * 0.5f;
+
+        pos.x = Mathf.Clamp(pos.x, startOurRect.x, startOurRect.x + sizeOurRect.x);
+        pos.y = Mathf.Clamp(pos.y, startOurRect.y, startOurRect.y + sizeOurRect.y);
+
+        int intersectionOurRect = LineIntersectsRect(center, center + (pos - center) * 2f,
+            new Vector2(startOurRect.x, startOurRect.y + sizeOurRect.y), // upper left corner
+            new Vector2(startOurRect.x + sizeOurRect.x, startOurRect.y + sizeOurRect.y),
+            new Vector2(startOurRect.x + sizeOurRect.x, startOurRect.y),
+            new Vector2(startOurRect.x, startOurRect.y)
+            );
+
+        for (int i = 0; i < abstractRooms.Length; i++)
+        {
+            var room = abstractRooms[i];
+            if (room.roomAttractions.Length <= 0) continue;
+            if (room.world.DisabledMapRooms.Contains(room.name)) continue;
+
+            if (room.offScreenDen || !room.AnySkyAccess || cr.room.abstractRoom == room) continue;
+            if (!Options.fallOnOtherLayers.Value && cr.room.abstractRoom.layer != room.layer) continue;
+
+
+            bool foundExit = false;
+            foreach(int otherRoom in room.connections)
+            {
+                //Log.LogDebug(otherRoom + " huy");
+                if (otherRoom != -1) foundExit = true;
+            }
+
+            if (!foundExit && Options.checkForConnections.Value) continue;
+
+            var start = GetMapPos(room);
+            var size = GetMapSize(room);
+
+            //var dist = (start + size * 0.5f - pos).magnitude;
+
+            var dir = (start + size * 0.5f - pos).normalized;
+            var dir2 = normvel;
+
+            //bool intersection = LineIntersectsLine(pos - normvel * (Math.Abs(pos.y - GetMapPos(room).y) + 100f), pos + normvel * 15000, upperline, upperline2);
+
+            int intersection = LineIntersectsRect(pos - normvel * 200f, start + size * 0.5f,// - normvel * (Math.Abs(pos.y - GetMapPos(room).y) + 100f), pos + normvel * 15000,
+                new Vector2(start.x, start.y + size.y),
+                new Vector2(start.x + size.x, start.y + size.y),
+                new Vector2(start.x + size.x, start.y),
+                new Vector2(start.x, start.y)
                 );
 
-            for (int i = 0; i < abstractRooms.Length; i++)
+            Log.LogDebug("FallThroughMap available room " + room.name + " Int: " + intersection + " Int2: " + intersectionOurRect);
+            
+            if (!Options.canGoUpwards.Value && (intersectionOurRect == 1))
             {
-                var room = abstractRooms[i];
-                if (room.roomAttractions.Length <= 0) continue;
-                if (room.world.DisabledMapRooms.Contains(room.name)) continue;
+                continue;
+            }
 
-                if (room.offScreenDen || !room.AnySkyAccess || cr.room.abstractRoom == room) continue;
-                if (!Options.fallOnOtherLayers.Value && cr.room.abstractRoom.layer != room.layer) continue;
+            if ((!Options.canGoThruSides.Value || (!Options.creaturesCanGoThruSides.Value && !(cr is Player))) && (intersectionOurRect == 2 || intersectionOurRect == 4))
+            {
+                continue;
+            }
 
-
-                bool foundExit = false;
-                foreach(int otherRoom in room.connections)
-                {
-                    //Log.LogDebug(otherRoom + " huy");
-                    if (otherRoom != -1) foundExit = true;
-                }
-
-                if (!foundExit && Options.checkForConnections.Value) continue;
-
-                var start = GetMapPos(room);
-                var size = GetMapSize(room);
-
-                //var dist = (start + size * 0.5f - pos).magnitude;
-
-                var dir = (start + size * 0.5f - pos).normalized;
-                var dir2 = normvel;
-
-                //bool intersection = LineIntersectsLine(pos - normvel * (Math.Abs(pos.y - GetMapPos(room).y) + 100f), pos + normvel * 15000, upperline, upperline2);
-
-                int intersection = LineIntersectsRect(pos - normvel * 200f, start + size * 0.5f,// - normvel * (Math.Abs(pos.y - GetMapPos(room).y) + 100f), pos + normvel * 15000,
+            if (intersection > 0 && ((intersection == 1 && intersectionOurRect == 3) || (intersection == 2 && intersectionOurRect == 4) || (intersectionOurRect == 1 && intersection == 3) || (intersectionOurRect == 2 && intersection == 4)))
+            {
+                Vector2 fallDirCheck = intersection == 1 ? new Vector2(0, -1) : intersection == 2 ? new Vector2(-1, 0) : intersection == 3 ? new Vector2(0, 1) : new Vector2(1, 0);
+                int intersection2 = LineIntersectsRect(pos - fallDirCheck * 200f, pos + fallDirCheck * 100000f * ((intersection == 2 || intersection == 4) ? 0.1f : 1f),
                     new Vector2(start.x, start.y + size.y),
                     new Vector2(start.x + size.x, start.y + size.y),
                     new Vector2(start.x + size.x, start.y),
                     new Vector2(start.x, start.y)
                     );
 
-                Log.LogDebug("FallThroughMap available room " + room.name + " Int: " + intersection + " Int2: " + intersectionOurRect);
+                Log.LogDebug("FallThroughMap room intersection side: Room " + room.name + ", pos: " + GetMapPos(room) + ", size: " + size + ", intersection:" + intersection2);
 
-                if (!Options.canGoThruSides.Value && (intersectionOurRect == 2 || intersectionOurRect == 4))
+                if (intersection2 == 0)
                 {
-                    continue;
+                    continue; // yeah no that's weird
+                    //fallDirCheck = (start + size * 0.5f - pos).normalized;
                 }
 
-                if (intersection > 0 && ((intersection == 1 && intersectionOurRect == 3) || (intersection == 2 && intersectionOurRect == 4) || (intersectionOurRect == 1 && intersection == 3) || (intersectionOurRect == 2 && intersection == 4)))
+                Vector2 intersectionPos = LineRectIntersection(pos - fallDirCheck * 200f, pos + fallDirCheck * 100000f * ((intersection == 2 || intersection == 4) ? 0.1f : 1f),
+                    new Vector2(start.x, start.y + size.y),
+                    new Vector2(start.x + size.x, start.y + size.y),
+                    new Vector2(start.x + size.x, start.y),
+                    new Vector2(start.x, start.y)
+                );
+
+                var dist = (pos - intersectionPos).magnitude;
+                Log.LogDebug("FallThroughMap available rooms: Room " + room.name + ", pos: " + GetMapPos(room) + ", size: " + size + ", Intersection!");
+                Log.LogDebug("Fall direction: " + fallDirCheck);
+                Log.LogDebug("Fall direction2: " + dir2);
+
+                float dot = Vector3.Dot(dir2, fallDirCheck);
+
+                Log.LogDebug("Fall dot: " + dot);
+                Log.LogDebug("Fall dist: " + dist + ", roomDist: " + roomDist);
+
+                //find the room with the shorter distance, with priority if the room is in the same layer
+                bool anotherLayer = fallRoom != null && (fallRoom.layer == cr.room.abstractRoom.layer && room.layer != cr.room.abstractRoom.layer);
+                if (dot > 0 && (!anotherLayer && dist < roomDist))
                 {
-                    Vector2 fallDirCheck = intersection == 1 ? new Vector2(0, -1) : intersection == 2 ? new Vector2(-1, 0) : intersection == 3 ? new Vector2(0, 1) : new Vector2(1, 0);
-                    int intersection2 = LineIntersectsRect(pos - fallDirCheck * 200f, pos + fallDirCheck * 100000f * ((intersection == 2 || intersection == 4) ? 0.1f : 1f),
-                        new Vector2(start.x, start.y + size.y),
-                        new Vector2(start.x + size.x, start.y + size.y),
-                        new Vector2(start.x + size.x, start.y),
-                        new Vector2(start.x, start.y)
-                        );
-
-                    Log.LogDebug("FallThroughMap room intersection side: Room " + room.name + ", pos: " + GetMapPos(room) + ", size: " + size + ", intersection:" + intersection2);
-
-                    if (intersection2 == 0)
-                    {
-                        continue; // yeah no that's weird
-                        //fallDirCheck = (start + size * 0.5f - pos).normalized;
-                    }
-
-                    Vector2 intersectionPos = LineRectIntersection(pos - fallDirCheck * 200f, pos + fallDirCheck * 100000f * ((intersection == 2 || intersection == 4) ? 0.1f : 1f),
-                        new Vector2(start.x, start.y + size.y),
-                        new Vector2(start.x + size.x, start.y + size.y),
-                        new Vector2(start.x + size.x, start.y),
-                        new Vector2(start.x, start.y)
-                    );
-
-                    var dist = (pos - intersectionPos).magnitude;
-                    Log.LogDebug("FallThroughMap available rooms: Room " + room.name + ", pos: " + GetMapPos(room) + ", size: " + size + ", Intersection!");
-                    Log.LogDebug("Fall direction: " + fallDirCheck);
-                    Log.LogDebug("Fall direction2: " + dir2);
-
-                    float dot = Vector3.Dot(dir2, fallDirCheck);
-
-                    Log.LogDebug("Fall dot: " + dot);
-                    Log.LogDebug("Fall dist: " + dist + ", roomDist: " + roomDist);
-
-                    //find the room with the shorter distance, with priority if the room is in the same layer
-                    bool anotherLayer = fallRoom != null && (fallRoom.layer == cr.room.abstractRoom.layer && room.layer != cr.room.abstractRoom.layer);
-                    if (dot > 0 && (!anotherLayer && dist < roomDist))
-                    {
-                        fallRoom = room;
-                        roomDist = dist;
-                        fallDir = fallDirCheck;
-                        intersectionPosition = intersectionPos;
-                    }
+                    fallRoom = room;
+                    roomDist = dist;
+                    fallDir = fallDirCheck;
+                    intersectionPosition = intersectionPos;
                 }
             }
+        }
 
-            if (fallRoom != null)
+        if (fallRoom != null)
+        {
+            var room = fallRoom;
+            var start = GetMapPos(room);
+            var size = GetMapSize(room);
+
+            Vector2 intersection = intersectionPosition;
+
+            Vector2 inRoomPos = WorldToRoomPos(intersection, room) - fallDir * 500f;
+
+            cr.room.game.world.ActivateRoom(room);
+
+            if (room.realizedRoom == null)
             {
-                var room = fallRoom;
-                var start = GetMapPos(room);
-                var size = GetMapSize(room);
+                Log.LogDebug("FallThroughMap realizedRoom can't be created.");
+                return restrictInRoomRange;
+            }
 
-                Vector2 intersection = intersectionPosition;
-
-                Vector2 inRoomPos = WorldToRoomPos(intersection, room) - fallDir * 500f;
-
-                cr.room.game.world.ActivateRoom(room);
-
-                if (room.realizedRoom == null)
+            if ((room.realizedRoom.GetTile(room.realizedRoom.GetTilePosition(inRoomPos)).Terrain == Room.Tile.TerrainType.Solid))
+            {
+                if ((room.realizedRoom.GetTile(room.realizedRoom.GetTilePosition(inRoomPos) + new RWCustom.IntVector2(-1, 0)).Terrain == Room.Tile.TerrainType.Air))
                 {
-                    Log.LogDebug("FallThroughMap realizedRoom can't be created.");
+                    inRoomPos += new Vector2(-20, 0);
+                }
+                else if ((room.realizedRoom.GetTile(room.realizedRoom.GetTilePosition(inRoomPos) + new RWCustom.IntVector2(1, 0)).Terrain == Room.Tile.TerrainType.Air))
+                {
+                    inRoomPos += new Vector2(20, 0);
+                }
+                else if ((room.realizedRoom.GetTile(room.realizedRoom.GetTilePosition(inRoomPos) + new RWCustom.IntVector2(0, 1)).Terrain == Room.Tile.TerrainType.Air))
+                {
+                    inRoomPos += new Vector2(0, 20);
+                }
+                else if ((room.realizedRoom.GetTile(room.realizedRoom.GetTilePosition(inRoomPos) + new RWCustom.IntVector2(0, -1)).Terrain == Room.Tile.TerrainType.Air))
+                {
+                    inRoomPos += new Vector2(0, -20);
+                }
+                else
+                {
+                    Log.LogDebug("FallThroughMap chosen room has a solid tile on the intersection. Not teleporting.");
+
                     return restrictInRoomRange;
                 }
-
-                if ((room.realizedRoom.GetTile(room.realizedRoom.GetTilePosition(inRoomPos)).Terrain == Room.Tile.TerrainType.Solid))
-                {
-                    if ((room.realizedRoom.GetTile(room.realizedRoom.GetTilePosition(inRoomPos) + new RWCustom.IntVector2(-1, 0)).Terrain == Room.Tile.TerrainType.Air))
-                    {
-                        inRoomPos += new Vector2(-20, 0);
-                    }
-                    else if ((room.realizedRoom.GetTile(room.realizedRoom.GetTilePosition(inRoomPos) + new RWCustom.IntVector2(1, 0)).Terrain == Room.Tile.TerrainType.Air))
-                    {
-                        inRoomPos += new Vector2(20, 0);
-                    }
-                    else if ((room.realizedRoom.GetTile(room.realizedRoom.GetTilePosition(inRoomPos) + new RWCustom.IntVector2(0, 1)).Terrain == Room.Tile.TerrainType.Air))
-                    {
-                        inRoomPos += new Vector2(0, 20);
-                    }
-                    else if ((room.realizedRoom.GetTile(room.realizedRoom.GetTilePosition(inRoomPos) + new RWCustom.IntVector2(0, -1)).Terrain == Room.Tile.TerrainType.Air))
-                    {
-                        inRoomPos += new Vector2(0, -20);
-                    }
-                    else
-                    {
-                        Log.LogDebug("FallThroughMap chosen room has a solid tile on the intersection. Not teleporting.");
-
-                        return restrictInRoomRange;
-                    }
-                }
-
-                Log.LogDebug("FallThroughMap chosen room: Room " + room.name + ", pos: " + GetMapPos(room) + ", room connections: " + room.connections.Length + ", size: " + size + ", Intersecton position: " + intersection + " For creature: " + cr);
-
-                //Vector2 addvel = new Vector2(0, -(roomDist / 20f / 3f / cr.gravity)) / 2.5f; // 2.5 instead of 2 because yeah it was a bit harsh by default
-                //vel += addvel;
-                //vel *= roomDist / 60f / cr.gravity;
-                vel *= Options.fallmul.Value * 0.01f;
-
-                FallingEntities.Add(cr, new FallingData(room.realizedRoom, vel, inRoomPos, roomDist, room.realizedRoom.game.clock - 999));//, worlds));
-            }
-            else
-            {
-                //Log.LogDebug("No room to fall.");
             }
 
-            return fallRoom == null ? restrictInRoomRange : -16000f;
+            Log.LogDebug("FallThroughMap chosen room: Room " + room.name + ", pos: " + GetMapPos(room) + ", room connections: " + room.connections.Length + ", size: " + size + ", Intersecton position: " + intersection + " For creature: " + cr);
+
+            //Vector2 addvel = new Vector2(0, -(roomDist / 20f / 3f / cr.gravity)) / 2.5f; // 2.5 instead of 2 because yeah it was a bit harsh by default
+            //vel += addvel;
+            //vel *= roomDist / 60f / cr.gravity;
+            vel *= Options.fallmul.Value * 0.01f;
+
+            FallingEntities.Add(cr, new FallingData(room.realizedRoom, vel, inRoomPos, roomDist, room.realizedRoom.game.clock - 999));//, worlds));
         }
-        return restrictInRoomRange;
+        else
+        {
+            //Log.LogDebug("No room to fall.");
+        }
+
+        return fallRoom == null ? restrictInRoomRange : -16000f;
     }
 }
