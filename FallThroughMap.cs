@@ -26,7 +26,7 @@ public partial class FallThroughMap : BaseUnityPlugin
     public const string PLUGIN_GUID = "useless.fallthroughmap";
     public const string PLUGIN_NAME = "Logical Pits";
     public const string PLUGIN_DESC = "";
-    public const string PLUGIN_VERSION = "0.1.1";
+    public const string PLUGIN_VERSION = "0.1.2";
     public static ManualLogSource Log;
     public static FallThroughMapOptions Options = FallThroughMapOptions.instance;
     
