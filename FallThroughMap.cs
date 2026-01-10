@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Permissions;
 using System.Text.RegularExpressions;
@@ -36,6 +38,15 @@ public partial class FallThroughMap : BaseUnityPlugin
         Log = base.Logger;
 
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
+    }
+
+    public static bool debug = true;
+    public static void LPLog(object data)
+    {
+        if (debug)
+        {
+            Log.LogDebug(data);
+        }
     }
 
     public void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
@@ -112,19 +123,23 @@ public partial class FallThroughMap : BaseUnityPlugin
             onlyPlayerFall = this.config.Bind<bool>("onlyPlayerFall", false);
             checkForConnections = this.config.Bind<bool>("checkForConnections", true);
             fallmul = this.config.Bind<int>("fallmul", 100, new ConfigAcceptableRange<int>(0, 200));
+            margin = this.config.Bind<int>("margin", 20, new ConfigAcceptableRange<int>(-200, 400));
             canGoThruSides = this.config.Bind<bool>("canGoThruSides", true);
             canGoUpwards = this.config.Bind<bool>("canGoUpwards", true);
             creaturesCanGoThruSides = this.config.Bind<bool>("creaturesCanGoThruSides", false);
+            noWait = this.config.Bind<bool>("noWait", true);
         }
 
+        public readonly Configurable<int> fallmul;
+        public readonly Configurable<int> margin;
         public readonly Configurable<bool> fallOnOtherLayers;
         public readonly Configurable<bool> onlyPlayerFall;
         public readonly Configurable<bool> checkForConnections;
         public readonly Configurable<bool> canGoThruSides;
         public readonly Configurable<bool> canGoUpwards;
         public readonly Configurable<bool> creaturesCanGoThruSides;
-        public readonly Configurable<int> fallmul;
-
+        public readonly Configurable<bool> noWait;
+        
         private UIelement[] UIArrPlayerOptions;
         
         public override void Initialize()
@@ -139,21 +154,25 @@ public partial class FallThroughMap : BaseUnityPlugin
             {
                 new OpLabel(10f, 550f, "Options", true),
                 new OpLabel(10f, 520f, "Fall on map's other layers"),
-                new OpCheckBox(fallOnOtherLayers, new Vector2(10f,490f)),
+                new OpCheckBox(fallOnOtherLayers, new Vector2(10f, 490f)),
                 new OpLabel(10f, 460f, "Only players can fall"),
-                new OpCheckBox(onlyPlayerFall, new Vector2(10f,430f)),
+                new OpCheckBox(onlyPlayerFall, new Vector2(10f, 430f)),
                 new OpLabel(10f, 400f, "Check for available connections"),
-                new OpCheckBox(checkForConnections, new Vector2(10f,370f)),
+                new OpCheckBox(checkForConnections, new Vector2(10f, 370f)),
                 new OpLabel(10f, 350f, "(if disabled, you will sometimes fall in inacessible rooms)"),
                 new OpLabel(10f, 320f, "Fall velocity multiplier (in percent)"),
                 new OpSlider(fallmul, new Vector2(10f, 260f), 200, false),
                 new OpLabel(10f, 220f, "Allow going through the sides of rooms"),
-                new OpCheckBox(canGoThruSides, new Vector2(10f,190f)),
+                new OpCheckBox(canGoThruSides, new Vector2(10f, 190f)),
                 new OpLabel(10f, 150f, "Allow going upwards in the room"),
-                new OpCheckBox(canGoUpwards, new Vector2(10f,110f)),
+                new OpCheckBox(canGoUpwards, new Vector2(10f, 110f)),
 
                 new OpLabel(200f, 520f, "Allow creatures going sides of the rooms"),
-                new OpCheckBox(creaturesCanGoThruSides, new Vector2(10f,490f)),
+                new OpCheckBox(creaturesCanGoThruSides, new Vector2(200f, 490f)),
+                new OpLabel(200f, 460f, "Screen end check margin (if you can't transition horizontally somewhere,\n you might wanna set this higher), default is 20"),
+                new OpSlider(margin, new Vector2(200f, 420f), 200, false),
+                //new OpLabel(200f, 460f, "Remove the wait before transition"),
+                //new OpCheckBox(noWait, new Vector2(200f, 430f)),
             };
 
             opTab.AddItems(UIArrPlayerOptions);
@@ -197,202 +216,143 @@ public partial class FallThroughMap : BaseUnityPlugin
         return index;
     }
 
-    public static void Creature_Update2(On.Creature.orig_Update orig, Creature self, bool eu)
+    public static void Creature_Update2(On.Creature.orig_Update orig, Creature cr, bool eu)
     {
-        orig(self, eu);
-
-        if (FallThroughMap.FallingEntities != null && FallThroughMap.FallingEntities.TryGetValue(self, out var huy))
+        orig(cr, eu);
+        try
         {
-            //if (huy.fellRoom == self.room)
-            //{
-                //FallThroughMap.FallingEntities.Remove(self);
-                //return;
-            //}
-
-            var fellRoom = huy.fellRoom;
-            var room = fellRoom.abstractRoom;
-            var vel = huy.lastVelocity;
-            var inRoomPos = huy.fellRoomPosition;
-            var curTime = huy.curTime;
-            var roomDist = huy.roomDist;
-            var cr = self;
-            var fallTime = (roomDist / 40f);
-            var abstrcr = cr.abstractCreature;
-
-            foreach (BodyChunk bodyChunk in cr.bodyChunks)
+            if (FallThroughMap.FallingEntities != null && FallThroughMap.FallingEntities.TryGetValue(cr, out var huy))
             {
-                if (bodyChunk == null) continue;
+                var fellRoom = huy.fellRoom;
+                var room = fellRoom.abstractRoom;
+                var vel = huy.lastVelocity;
+                var inRoomPos = huy.fellRoomPosition;
+                var curTime = huy.curTime;
+                var fallTime = (huy.roomDist / 40f);
+                var abstrcr = cr.abstractCreature;
 
-                bodyChunk.vel = vel;
-                //bodyChunk.vel *= 0;
-                //bodyChunk.vel += new Vector2(0, cr.gravity);
-            }
-
-            if (fellRoom != null && ((cr is Player && fellRoom.ReadyForPlayer) || (abstrcr.abstractAI != null && fellRoom.readyForAI)))
-            {
-                /*for (int j = 0; j < huy.worlds.Count; j++)
+                if (fellRoom != null && ((cr is Player && fellRoom.ReadyForPlayer) || (abstrcr.abstractAI != null && fellRoom.readyForAI)))
                 {
-                    Log.LogDebug(huy.worlds[j].abstractRooms.Length);
-                }*/
-
-                if (abstrcr.Room != fellRoom.abstractRoom)
-                {
-                    //cr.FlyAwayFromRoom(false);
-
-                    Vector2 pos = fellRoom.game.world.RoomToWorldPos(inRoomPos, room.index);
-                    var coord = fellRoom.GetWorldCoordinate(inRoomPos);
-                    Creature.Grasp[] grasps = { };
-
-                    bool hasgrasps = false;
-
-                    if (cr.grasps != null)
+                    if (abstrcr.Room != fellRoom.abstractRoom)
                     {
-                        hasgrasps = true;
+                        Vector2 pos = fellRoom.game.world.RoomToWorldPos(inRoomPos, room.index);
+                        var coord = fellRoom.GetWorldCoordinate(inRoomPos);
 
-                        foreach (var grasp in cr.grasps)
+                        List<AbstractPhysicalObject> allConnectedObjects = abstrcr.GetAllConnectedObjects();
+                        for (int i = 0; i < allConnectedObjects.Count; i++)
                         {
-                            if (grasp == null) continue;
-                            if (grasp.grabbed == null) continue;
-                            if (!(grasp.grabbed is Creature)) continue;
+                            if (allConnectedObjects[i].realizedObject != null)
+                            {
+                                Creature creature = allConnectedObjects[i].realizedObject as Creature;
 
-                            grasp.Release();
-
-                            (grasp.grabbed as Creature).abstractCreature.Move(coord);
-                            (grasp.grabbed as Creature).PlaceInRoom(fellRoom);
-                            (grasp.grabbed as Creature).SpitOutOfShortCut(new RWCustom.IntVector2((int)(inRoomPos.x / 20f), (int)(inRoomPos.y / 20f)), fellRoom, false);
-
-                            Log.LogDebug("creattt" + grasp.grabbed);
-
-                            grasps[grasp.graspUsed] = new Creature.Grasp(grasp.grabber, grasp.grabbed, grasp.graspUsed, grasp.chunkGrabbed, grasp.shareability, grasp.dominance, grasp.pacifying);
+                                if (allConnectedObjects[i].realizedObject.room != null)
+                                {
+                                    allConnectedObjects[i].realizedObject.room.RemoveObject(allConnectedObjects[i].realizedObject);
+                                    //LPLog(allConnectedObjects[i].realizedObject);
+                                }
+                            }
                         }
-                    }
-
-
-                    abstrcr.Move(coord);
-                    cr.PlaceInRoom(fellRoom);
-                    cr.SpitOutOfShortCut(new RWCustom.IntVector2((int)(inRoomPos.x / 20f), (int)(inRoomPos.y / 20f)), fellRoom, false);
-                    
-                    if (hasgrasps)
-                    {
-                        foreach (var grasp in grasps)
+                        if (cr.graphicsModule != null)
                         {
+                            cr.graphicsModule.SuckedIntoShortCut(cr.mainBodyChunk.pos);
+                        }
+                        if (cr.appendages != null)
+                        {
+                            for (int num8 = 0; num8 < cr.appendages.Count; num8++)
+                            {
+                                cr.appendages[num8].Update();
+                            }
+                        }
+                        // i could use cr.SuckedIntoShortcut instead but that shit is private for whatever reason (i can use invoke but meh)
+
+                        cr.SpitOutOfShortCut(new RWCustom.IntVector2((int)(inRoomPos.x / 20f), (int)(inRoomPos.y / 20f)), fellRoom, true);
+                        
+                        List<AbstractPhysicalObject> objs = abstrcr.GetAllConnectedObjects();
+                        for (int i = 0; i < objs.Count; i++)
+                        {
+                            objs[i].pos = abstrcr.pos;
+                            objs[i].Room.RemoveEntity(objs[i]);
+                            room.AddEntity(objs[i]);
+                            objs[i].realizedObject.sticksRespawned = true;
+                        }
+
+                        //cr.LoseAllGrasps();
+                        /*for (int i = 0; i < cr.grasps.Count(); i++)
+                        {
+                            var grasp = cr.grasps[i];
+
+                            //cr.ReleaseGrasp(i);
                             cr.Grab(grasp.grabbed, grasp.graspUsed, grasp.chunkGrabbed, grasp.shareability, grasp.dominance, false, grasp.pacifying);
-                            Log.LogDebug("creattt2" + grasp.grabbed);
-                        }
-                    }
+                        }*/
 
-                    /*cr.room.RemoveObject(cr);
-                    abstrcr.Move(coord);
-                    cr.PlaceInRoom(fellRoom);
-                    cr.graphicsModule.Reset();
-
-                    List<AbstractPhysicalObject> allConnectedObjects = abstrcr.GetAllConnectedObjects();
-                    for (int i = 0; i < allConnectedObjects.Count; i++)
-                    {
-                        var physobj = allConnectedObjects[i];
-
-                        if (physobj.realizedObject != null)
+                        for (int i = 0; i < allConnectedObjects.Count; i++) // for safety
                         {
-                            for (int j = 0; j < physobj.realizedObject.bodyChunks.Length; j++)
+                            int num = 0;
+                            for (int s = 0; s < fellRoom.updateList.Count; s++)
                             {
-                                physobj.realizedObject.bodyChunks[j].HardSetPosition(inRoomPos);
-                                physobj.realizedObject.bodyChunks[j].vel *= 0f;
-                            }
-
-                            if (physobj.realizedObject.appendages != null)
-                                for (int j = 0; j < cr.appendages.Count; j++)
-                                    physobj.realizedObject.appendages[j].Update();
-
-                            if (physobj.realizedObject.graphicsModule != null)
-                            {
-                                physobj.realizedObject.graphicsModule.SuckedIntoShortCut(inRoomPos);
-                                physobj.realizedObject.graphicsModule.Reset();
-                            }
-
-                            if ((physobj.realizedObject as Player) != null && (physobj.realizedObject as Player).spearOnBack != null)
-                            {
-                                if ((physobj.realizedObject as Player).spearOnBack.spear != null)
+                                if (allConnectedObjects[i].realizedObject == fellRoom.updateList[s])
                                 {
-                                    (cr as Player).spearOnBack.spear.abstractPhysicalObject.pos = new WorldCoordinate(abstrcr.pos.room, abstrcr.pos.x, abstrcr.pos.y, abstrcr.pos.abstractNode);
-                                    (physobj.realizedObject as Player).spearOnBack.spear.PlaceInRoom(fellRoom);
+                                    num++;
+                                }
+                                if (num > 1)
+                                {
+                                    fellRoom.updateList.RemoveAt(s);
                                 }
                             }
-
-                            if (physobj.realizedObject.room == fellRoom) continue;
-
-                            physobj.pos = new WorldCoordinate(coord.room, coord.x, coord.y, coord.abstractNode);
-                            fellRoom.AddObject(physobj.realizedObject);
-                            physobj.realizedObject.NewRoom(fellRoom);
-         
-                            Log.LogDebug("attached object is: " + physobj);
                         }
-                    }*/
+                    }
 
+                    if (abstrcr.FollowedByCamera(0) && fellRoom.ReadyForPlayer && fellRoom.game.cameras[0].room != fellRoom)
+                    {
+                        var room_camera = fellRoom.game.cameras[0];
+                        room_camera.virtualMicrophone.AllQuiet();
 
-                            /*if (abstrcr.creatureTemplate.AI && abstrcr.abstractAI.RealAI != null && abstrcr.abstractAI.RealAI.pathFinder != null)
+                        if (CameraScrollOn)
+                        {
+                            room_camera.MoveCamera(fellRoom, 0);
+                        }
+                        else
+                        {
+                            //var oldRoom = room_camera.room;
+                            room_camera.MoveCamera(fellRoom, ClosestCamera(fellRoom, inRoomPos));
+                        }
+                    }
+
+                    if ((cr.room.game.clock) / 40f > (curTime / 40f + fallTime / 40))
+                    {
+                        List<AbstractPhysicalObject> allConnectedObjects = abstrcr.GetAllConnectedObjects();
+                        for (int i = 0; i < allConnectedObjects.Count; i++)
+                        {
+                            var physobj = allConnectedObjects[i];
+
+                            if (physobj != null && physobj.realizedObject != null)
                             {
-                                abstrcr.abstractAI.SetDestination(QuickConnectivity.DefineNodeOfLocalCoordinate(coord, abstrcr.world, abstrcr.creatureTemplate));
-                                abstrcr.abstractAI.timeBuffer = 0;
-                                if (abstrcr.abstractAI.destination.room == abstrcr.pos.room && abstrcr.abstractAI.destination.abstractNode == abstrcr.pos.abstractNode)
+                                foreach (BodyChunk bodyChunk in physobj.realizedObject.bodyChunks)
                                 {
-                                    abstrcr.abstractAI.path.Clear();
+                                    if (bodyChunk == null) continue;
+
+                                    bodyChunk.vel = vel;
                                 }
-                                else
-                                {
-                                    List<WorldCoordinate> list = abstrcr.abstractAI.RealAI.pathFinder.CreatePathForAbstractreature(abstrcr.abstractAI.destination);
-                                    if (list != null)
-                                    {
-                                        abstrcr.abstractAI.path = list;
-                                    }
-                                    else
-                                    {
-                                        abstrcr.abstractAI.FindPath(abstrcr.abstractAI.destination);
-                                    }
-                                }
-                                abstrcr.abstractAI.RealAI = null;
-                            }*/
-                }
-
-                if (abstrcr.FollowedByCamera(0) && fellRoom.ReadyForPlayer && fellRoom.game.cameras[0].room != fellRoom)
-                {
-                    var room_camera = fellRoom.game.cameras[0];
-                    room_camera.virtualMicrophone.AllQuiet();
-
-                    if (CameraScrollOn)
-                    {
-                        room_camera.MoveCamera(fellRoom, 0);
-                    }
-                    else
-                    {
-                        //var oldRoom = room_camera.room;
-                        room_camera.MoveCamera(fellRoom, ClosestCamera(fellRoom, inRoomPos));
-                    }
-                }
-
-                if ((cr.room.game.clock) / 40f > (curTime / 40f + fallTime / 40))
-                {
-                    List<AbstractPhysicalObject> allConnectedObjects = abstrcr.GetAllConnectedObjects();
-                    for (int i = 0; i < allConnectedObjects.Count; i++)
-                    {
-                        var physobj = allConnectedObjects[i];
-
-                        foreach (BodyChunk bodyChunk in physobj.realizedObject.bodyChunks)
-                        {
-                            if (bodyChunk == null) continue;
-
-                            bodyChunk.vel = vel;
+                            }
                         }
 
-                        if (physobj.realizedObject.graphicsModule != null)
-                        {
-                            physobj.realizedObject.graphicsModule.SuckedIntoShortCut(inRoomPos);
-                            physobj.realizedObject.graphicsModule.Reset();
-                        }
+                        FallThroughMap.FallingEntities.Remove(cr);
                     }
-
-                    FallThroughMap.FallingEntities.Remove(self);
                 }
             }
+        }
+        catch (Exception e)
+        {
+            Log.LogDebug(e);
+
+            // Get stack trace for the exception with source file information
+            var st = new StackTrace(e, true);
+            // Get the top stack frame
+            var frame = st.GetFrame(0);
+            // Get the line number from the stack frame
+            var line = frame.GetFileLineNumber();
+            Log.LogDebug(st);
+            Log.LogDebug(line);
         }
     }
 
@@ -549,7 +509,8 @@ public partial class FallThroughMap : BaseUnityPlugin
         AbstractRoom[] abstractRooms = cr.room.game.world.abstractRooms;
         //should probably sort rooms by layer
 
-        var posit = cr.bodyChunks[0].pos;
+        var bodyChunk = cr.bodyChunks[0];
+        var posit = bodyChunk.pos;
 
         RoomBorderPushBack pushback = null;
         for (int i = 0; i < cr.room.updateList.Count; i++)
@@ -559,11 +520,12 @@ public partial class FallThroughMap : BaseUnityPlugin
                 pushback = cr.room.updateList[i] as RoomBorderPushBack;
             }
         }
-
-        bool fell = posit.y < -100f
-            || posit.y > cr.room.PixelHeight + 100f
-            || posit.x > cr.room.PixelWidth + 200f - 20f
-            || posit.x < -200f + 20f;
+        float range = 200f; // 100f for y, 200f for x
+        float add = Options.margin.Value;//80f; // 20f
+        bool fell = posit.y < -range + add
+            || posit.y > cr.room.PixelHeight + range - add
+            || posit.x > cr.room.PixelWidth + range - add
+            || posit.x < -range + add;
 
         if (pushback != null)
         {
@@ -574,9 +536,9 @@ public partial class FallThroughMap : BaseUnityPlugin
 
         //so much magic numbers, beautiful
 
-        if (!fell) { return restrictInRoomRange; }
-
         if (FallingEntities.TryGetValue(cr, out var huy) || cr.grabbedBy.Count > 0) return -16000f;
+
+        if (!fell) { return restrictInRoomRange; }
 
 
         var vel = new Vector2();
@@ -655,7 +617,7 @@ public partial class FallThroughMap : BaseUnityPlugin
             bool foundExit = false;
             foreach(int otherRoom in room.connections)
             {
-                //Log.LogDebug(otherRoom + " huy");
+                //LPLog(otherRoom + " huy");
                 if (otherRoom != -1) foundExit = true;
             }
 
@@ -678,7 +640,7 @@ public partial class FallThroughMap : BaseUnityPlugin
                 new Vector2(start.x, start.y)
                 );
 
-            Log.LogDebug("FallThroughMap available room " + room.name + " Int: " + intersection + " Int2: " + intersectionOurRect);
+            //LPLog("FallThroughMap available room " + room.name + " Int: " + intersection + " Int2: " + intersectionOurRect);
             
             if (!Options.canGoUpwards.Value && (intersectionOurRect == 1))
             {
@@ -700,7 +662,7 @@ public partial class FallThroughMap : BaseUnityPlugin
                     new Vector2(start.x, start.y)
                     );
 
-                Log.LogDebug("FallThroughMap room intersection side: Room " + room.name + ", pos: " + GetMapPos(room) + ", size: " + size + ", intersection:" + intersection2);
+                //LPLog("FallThroughMap room intersection side: Room " + room.name + ", pos: " + GetMapPos(room) + ", size: " + size + ", intersection:" + intersection2);
 
                 if (intersection2 == 0)
                 {
@@ -716,14 +678,14 @@ public partial class FallThroughMap : BaseUnityPlugin
                 );
 
                 var dist = (pos - intersectionPos).magnitude;
-                Log.LogDebug("FallThroughMap available rooms: Room " + room.name + ", pos: " + GetMapPos(room) + ", size: " + size + ", Intersection!");
-                Log.LogDebug("Fall direction: " + fallDirCheck);
-                Log.LogDebug("Fall direction2: " + dir2);
+                LPLog("FallThroughMap available rooms: Room " + room.name + ", pos: " + GetMapPos(room) + ", size: " + size + ", Intersection!");
+                LPLog("Fall direction: " + fallDirCheck);
+                LPLog("Fall direction2: " + dir2);
 
                 float dot = Vector3.Dot(dir2, fallDirCheck);
 
-                Log.LogDebug("Fall dot: " + dot);
-                Log.LogDebug("Fall dist: " + dist + ", roomDist: " + roomDist);
+                LPLog("Fall dot: " + dot);
+                LPLog("Fall dist: " + dist + ", roomDist: " + roomDist);
 
                 //find the room with the shorter distance, with priority if the room is in the same layer
                 bool anotherLayer = fallRoom != null && (fallRoom.layer == cr.room.abstractRoom.layer && room.layer != cr.room.abstractRoom.layer);
@@ -751,7 +713,7 @@ public partial class FallThroughMap : BaseUnityPlugin
 
             if (room.realizedRoom == null)
             {
-                Log.LogDebug("FallThroughMap realizedRoom can't be created.");
+                LPLog("FallThroughMap realizedRoom can't be created.");
                 return restrictInRoomRange;
             }
 
@@ -773,26 +735,26 @@ public partial class FallThroughMap : BaseUnityPlugin
                 {
                     inRoomPos += new Vector2(0, -20);
                 }
-                else
+                else // todo: make it detect deeper corners
                 {
-                    Log.LogDebug("FallThroughMap chosen room has a solid tile on the intersection. Not teleporting.");
+                    LPLog("FallThroughMap chosen room has a solid tile on the intersection. Not teleporting.");
 
                     return restrictInRoomRange;
                 }
             }
 
-            Log.LogDebug("FallThroughMap chosen room: Room " + room.name + ", pos: " + GetMapPos(room) + ", room connections: " + room.connections.Length + ", size: " + size + ", Intersecton position: " + intersection + " For creature: " + cr);
+            LPLog("FallThroughMap chosen room: Room " + room.name + ", pos: " + GetMapPos(room) + ", room connections: " + room.connections.Length + ", size: " + size + ", Intersecton position: " + intersection + " For creature: " + cr);
 
             //Vector2 addvel = new Vector2(0, -(roomDist / 20f / 3f / cr.gravity)) / 2.5f; // 2.5 instead of 2 because yeah it was a bit harsh by default
             //vel += addvel;
             //vel *= roomDist / 60f / cr.gravity;
             vel *= Options.fallmul.Value * 0.01f;
 
-            FallingEntities.Add(cr, new FallingData(room.realizedRoom, vel, inRoomPos, roomDist, room.realizedRoom.game.clock - 999));//, worlds));
+            FallingEntities.Add(cr, new FallingData(room.realizedRoom, vel, inRoomPos, roomDist, room.realizedRoom.game.clock - (/*Options.noWait.Value*/true ? 999 : 0)));//, worlds));
         }
         else
         {
-            //Log.LogDebug("No room to fall.");
+            //LPLog("No room to fall.");
         }
 
         return fallRoom == null ? restrictInRoomRange : -16000f;
